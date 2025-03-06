@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from pysimanneal import simanneal
 from mnt.pyfiction import *  # Ensure this import is correct
 from datetime import datetime
-
+import os
+import glob
 
 # Function to generate simulation parameters
 def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=1):
@@ -30,24 +31,10 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=
     sp = simanneal.SimParams()
     sp.mu = mu
     sp.num_instances = num_instances
+    sp.anneal_cycles = 10000
     return physical_parameters, sp
 
-# Function to generate a random SiDB layout
-def generate_layout(generate_params, physical_parameters):
-    """
-    Generates a random SiDB layout and initializes charge distribution.
 
-    Parameters:
-    - generate_params: Parameters for generating the SiDB layout
-    - physical_parameters: Physical parameters for the simulation
-
-    Returns:
-    - layout: Generated SiDB layout
-    - cds: Charge distribution surface object
-    """
-    layout = generate_random_sidb_layout(sidb_100_lattice(), generate_params)
-    cds = charge_distribution_surface_100(layout, physical_parameters)
-    return layout, cds
 
 # Function to run QuickExact simulation
 def run_quickexact_simulation(layout, physical_params):
@@ -123,7 +110,7 @@ def calculate_tts(result_quickexact, all_sa_solution):
     - time_to_solution: Time-to-solution statistic
     """
     st = time_to_solution_stats()
-    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.997, st)
+    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.999, st)
     return st.time_to_solution
 
 # Function to plot TTS heatmap and/or 3D bar plot
@@ -178,7 +165,7 @@ def plot_tts(tts_data, param1_values, param2_values, param1_name, param2_name, p
 
 # Main function for hyperparameter tuning
 # Function for hyperparameter tuning with TTS threshold
-def hyperparameter_tuning(physical_parameters, param_types, sp, param1, param1_values, param2, param2_values, layout, layout_coordinates_angstrom, num_simulations, plot_heatmap=True, plot_3d=False):
+def run_tts_measurement(physical_parameters, sp, layout, layout_coordinates_angstrom, num_simulations):
     """
     Performs hyperparameter tuning by running simulations with different parameter values.
     Aborts if TTS exceeds a given threshold.
@@ -199,44 +186,18 @@ def hyperparameter_tuning(physical_parameters, param_types, sp, param1, param1_v
     """
     result_quickexact = run_quickexact_simulation(layout, physical_parameters)
 
-    # Initialize TTS data array
-    tts_data = np.zeros((len(param1_values), len(param2_values)))
+    gs_results = groundstate_from_simulation_result(result_quickexact)
 
-    # Loop through combinations of param1 and param2
-    for i, p1_value in enumerate(param1_values):
-        for j, p2_value in enumerate(param2_values):
-            try:
-                # Set simulation parameters dynamically based on the expected type
-                if param1 in param_types:
-                    p1_value = param_types[param1](p1_value)  # Cast to the correct type
-                if param2 in param_types:
-                    p2_value = param_types[param2](p2_value)  # Cast to the correct type
+    gs = gs_results[0]
+    print(gs)
 
-                setattr(sp, param1, p1_value)
-                setattr(sp, param2, p2_value)
-            except (TypeError, ValueError) as e:
-                print(f"Error setting parameters: {e}")
-                continue
+    # Run the SimAnneal simulation
+    all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations)
 
-            # Run the SimAnneal simulation
-            all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations)
+    # Calculate TTS for the current (param1, param2) combination
+    tts_value = calculate_tts(result_quickexact, all_sa_solution)
 
-            # Calculate TTS for the current (param1, param2) combination
-            tts_value = calculate_tts(result_quickexact, all_sa_solution)
-            tts_data[i, j] = tts_value
-
-            print(f"{param1}: {p1_value} | {param2}: {p2_value} | TTS: {tts_value}")
-
-            tts_threshold = 10000  # Threshold value for TTS to abort the simulation
-            # Check if the TTS exceeds the threshold
-            if tts_value > tts_threshold:
-                tts_data[i, j] = 0
-                print(f"TTS threshold exceeded: {tts_value} > {tts_threshold}")
-                #return  # Exit the function if the TTS threshold is exceeded
-
-    # Plot the TTS data
-    plot_tts(tts_data, param1_values, param2_values, param1, param2, plot_heatmap, plot_3d)
-
+    return tts_value
 
 
 def main():
@@ -247,62 +208,34 @@ def main():
 
     physical_parameters, sp = initialize_simulation()
 
-    number_of_simanneal_simulation_runs_to_determine_tts = 400
+    number_of_simanneal_simulation_runs_to_determine_tts = 1000
+
+    total_tts = 0
 
     # Generate layout parameters
     generate_params = generate_random_sidb_layout_params()
-    generate_params.number_of_sidbs = 10
+    generate_params.number_of_sidbs = 12
     generate_params.positive_sidbs = positive_charges.FORBIDDEN
     generate_params.coordinate_pair = ((0, 0), (20, 20))
 
-    layout, cds = generate_layout(generate_params, physical_parameters)
+    layouts = generate_multiple_random_sidb_layouts(sidb_100_lattice(), generate_params)
 
-    # Convert coordinates from nm to angstroms
-    all_positions_nm = cds.get_all_sidb_locations_in_nm()
-    print(all_positions_nm)
-    layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+    for lyt in layouts:
+        cds = charge_distribution_surface_100(lyt)
 
-    param_types = {
-        'anneal_cycles': int,
-        'T_e_inv_point': float,
-        'v_freeze_end_point': float,
-        'num_instances': int,
-        'result_queue_factor': int,
-        'result_queue_size': int,
-        'hop_attempt_factor': int,
-        'preanneal_cycles': int,
-        'alpha': float,
-        'T_init': float,
-        'T_min': float,
-        'v_freeze_init': float,
-        'v_freeze_threshold': float,
-        'v_freeze_reset': float,
-        'v_freeze_cycles': int,
-        'phys_validity_check_cycles': int,
-        'strategic_v_freeze_reset': bool,
-        'reset_T_during_v_freeze_reset': bool,
-        'v_freeze_step': float,
-    }
+        # Convert coordinates from nm to angstroms
+        all_positions_nm = cds.get_all_sidb_locations_in_nm()
 
-    # Automatically set parameter values based on their type
-    param1 = 'anneal_cycles'
-    param2 = 'T_init'
+        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
-    if param1 in param_types:
-        param1_type = param_types[param1]
-        param1_values = np.linspace(200, 600, num=10).astype(param1_type)
+        # Perform hyperparameter tuning
+        total_tts+=run_tts_measurement(
+            physical_parameters, sp,
+            lyt, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts       # Set to False if you don't want to plot 3D bar plot
+        )
 
-    if param2 in param_types:
-        param2_type = param_types[param2]
-        param2_values = np.linspace(100, 10000, num=10).astype(param2_type)
+        print(total_tts)
 
-    # Perform hyperparameter tuning
-    hyperparameter_tuning(
-        physical_parameters,param_types, sp, param1, param1_values, param2, param2_values,
-        layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts,
-        plot_heatmap=True,  # Set to False if you don't want to plot heatmap
-        plot_3d=True        # Set to False if you don't want to plot 3D bar plot
-    )
 
 if __name__ == "__main__":
     main()

@@ -753,9 +753,6 @@ class EuclCoord3d(object):
 
 # Register EuclCoord3d in _simanneal:
 _simanneal.EuclCoord3d_swigregister(EuclCoord3d)
-lat_a = cvar.lat_a
-lat_b = cvar.lat_b
-lat_c = cvar.lat_c
 eta = cvar.eta
 Q0 = cvar.Q0
 PI = cvar.PI
@@ -776,8 +773,8 @@ class SimParams(object):
         return _simanneal.SimParams_setDBLocs(self, *args)
 
     @staticmethod
-    def latToEuclCoord(n, m, l):
-        return _simanneal.SimParams_latToEuclCoord(n, m, l)
+    def latToEuclCoord(n, m, l, lat_unit_cell):
+        return _simanneal.SimParams_latToEuclCoord(n, m, l, lat_unit_cell)
 
     def setFixedCharges(self, t_fc_locs, t_fcs, t_fc_eps_rs, t_fc_lambdas):
         return _simanneal.SimParams_setFixedCharges(self, t_fc_locs, t_fcs, t_fc_eps_rs, t_fc_lambdas)
@@ -807,6 +804,7 @@ class SimParams(object):
     eps_r = property(_simanneal.SimParams_eps_r_get, _simanneal.SimParams_eps_r_set)
     debye_length = property(_simanneal.SimParams_debye_length_get, _simanneal.SimParams_debye_length_set)
     n_dbs = property(_simanneal.SimParams_n_dbs_get, _simanneal.SimParams_n_dbs_set)
+    lat_vec = property(_simanneal.SimParams_lat_vec_get, _simanneal.SimParams_lat_vec_set)
     db_locs = property(_simanneal.SimParams_db_locs_get, _simanneal.SimParams_db_locs_set)
     db_r = property(_simanneal.SimParams_db_r_get, _simanneal.SimParams_db_r_set)
     v_ij = property(_simanneal.SimParams_v_ij_get, _simanneal.SimParams_v_ij_set)
@@ -829,7 +827,7 @@ class SimParams(object):
         self.setDBLocs(dbs)
 
     def set_v_ext(self, v_ext):
-        self.pySetVExt(FloatVector(v_ext))
+        self.pySetVExt(DoubleVector(v_ext))
 
     def set_fixed_charges(self, eucl_coords_3d, charges, eps_rs, lambdas):
         self.pySetFixedCharges(
@@ -851,8 +849,8 @@ class SimParams(object):
 # Register SimParams in _simanneal:
 _simanneal.SimParams_swigregister(SimParams)
 
-def SimParams_latToEuclCoord(n, m, l):
-    return _simanneal.SimParams_latToEuclCoord(n, m, l)
+def SimParams_latToEuclCoord(n, m, l, lat_unit_cell):
+    return _simanneal.SimParams_latToEuclCoord(n, m, l, lat_unit_cell)
 
 class ChargeConfigResult(object):
     thisown = property(lambda x: x.this.own(), lambda x, v: x.this.own(v), doc="The membership flag")

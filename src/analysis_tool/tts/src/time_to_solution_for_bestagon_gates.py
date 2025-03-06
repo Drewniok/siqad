@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from pysimanneal import simanneal
 from mnt.pyfiction import *  # Ensure this import is correct
 from datetime import datetime
-
+import os
+import glob
 
 # Function to generate simulation parameters
 def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=1):
@@ -30,24 +31,18 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=
     sp = simanneal.SimParams()
     sp.mu = mu
     sp.num_instances = num_instances
+    sp.anneal_cycles = 100
     return physical_parameters, sp
 
-# Function to generate a random SiDB layout
-def generate_layout(generate_params, physical_parameters):
-    """
-    Generates a random SiDB layout and initializes charge distribution.
+def read_layout(gate_name):
+    # Define the folder path relative to your current directory (src)
+    folder_path = os.path.join(os.getcwd(), "../bestagon_gates")
 
-    Parameters:
-    - generate_params: Parameters for generating the SiDB layout
-    - physical_parameters: Physical parameters for the simulation
+    folder_file = folder_path + "/" + gate_name
 
-    Returns:
-    - layout: Generated SiDB layout
-    - cds: Charge distribution surface object
-    """
-    layout = generate_random_sidb_layout(sidb_100_lattice(), generate_params)
-    cds = charge_distribution_surface_100(layout, physical_parameters)
-    return layout, cds
+    print(folder_file)
+
+    return read_sqd_layout_100(folder_file)
 
 # Function to run QuickExact simulation
 def run_quickexact_simulation(layout, physical_params):
@@ -123,7 +118,7 @@ def calculate_tts(result_quickexact, all_sa_solution):
     - time_to_solution: Time-to-solution statistic
     """
     st = time_to_solution_stats()
-    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.997, st)
+    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.999, st)
     return st.time_to_solution
 
 # Function to plot TTS heatmap and/or 3D bar plot
@@ -178,7 +173,7 @@ def plot_tts(tts_data, param1_values, param2_values, param1_name, param2_name, p
 
 # Main function for hyperparameter tuning
 # Function for hyperparameter tuning with TTS threshold
-def hyperparameter_tuning(physical_parameters, param_types, sp, param1, param1_values, param2, param2_values, layout, layout_coordinates_angstrom, num_simulations, plot_heatmap=True, plot_3d=False):
+def run_tts_measurement(physical_parameters, sp, layout, layout_coordinates_angstrom, num_simulations):
     """
     Performs hyperparameter tuning by running simulations with different parameter values.
     Aborts if TTS exceeds a given threshold.
@@ -199,44 +194,13 @@ def hyperparameter_tuning(physical_parameters, param_types, sp, param1, param1_v
     """
     result_quickexact = run_quickexact_simulation(layout, physical_parameters)
 
-    # Initialize TTS data array
-    tts_data = np.zeros((len(param1_values), len(param2_values)))
+    # Run the SimAnneal simulation
+    all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations)
 
-    # Loop through combinations of param1 and param2
-    for i, p1_value in enumerate(param1_values):
-        for j, p2_value in enumerate(param2_values):
-            try:
-                # Set simulation parameters dynamically based on the expected type
-                if param1 in param_types:
-                    p1_value = param_types[param1](p1_value)  # Cast to the correct type
-                if param2 in param_types:
-                    p2_value = param_types[param2](p2_value)  # Cast to the correct type
+    # Calculate TTS for the current (param1, param2) combination
+    tts_value = calculate_tts(result_quickexact, all_sa_solution)
 
-                setattr(sp, param1, p1_value)
-                setattr(sp, param2, p2_value)
-            except (TypeError, ValueError) as e:
-                print(f"Error setting parameters: {e}")
-                continue
-
-            # Run the SimAnneal simulation
-            all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations)
-
-            # Calculate TTS for the current (param1, param2) combination
-            tts_value = calculate_tts(result_quickexact, all_sa_solution)
-            tts_data[i, j] = tts_value
-
-            print(f"{param1}: {p1_value} | {param2}: {p2_value} | TTS: {tts_value}")
-
-            tts_threshold = 10000  # Threshold value for TTS to abort the simulation
-            # Check if the TTS exceeds the threshold
-            if tts_value > tts_threshold:
-                tts_data[i, j] = 0
-                print(f"TTS threshold exceeded: {tts_value} > {tts_threshold}")
-                #return  # Exit the function if the TTS threshold is exceeded
-
-    # Plot the TTS data
-    plot_tts(tts_data, param1_values, param2_values, param1, param2, plot_heatmap, plot_3d)
-
+    return tts_value
 
 
 def main():
@@ -244,65 +208,76 @@ def main():
     Main function to set up parameters, generate layout, and perform hyperparameter tuning.
     """
     # Set up layout parameters and physical properties
-
     physical_parameters, sp = initialize_simulation()
 
-    number_of_simanneal_simulation_runs_to_determine_tts = 400
+    number_of_simanneal_simulation_runs_to_determine_tts = 1000
 
-    # Generate layout parameters
-    generate_params = generate_random_sidb_layout_params()
-    generate_params.number_of_sidbs = 10
-    generate_params.positive_sidbs = positive_charges.FORBIDDEN
-    generate_params.coordinate_pair = ((0, 0), (20, 20))
+    total_tts = 0  # Initialize the overall total TTS
 
-    layout, cds = generate_layout(generate_params, physical_parameters)
+    # List of gates and their corresponding truth tables
+    gates = [
+        ("and", create_and_tt()),
+        ("or", create_or_tt()),
+        ("nand", create_nand_tt()),
+        ("nor", create_nor_tt()),
+        ("xor", create_xor_tt()),
+        ("xnor", create_xnor_tt()),
+        ("hourglass", create_double_wire_tt()),
+        ("cx", create_crossing_wire_tt()),
+        ("ha", create_half_adder_tt())
+    ]
 
-    # Convert coordinates from nm to angstroms
-    all_positions_nm = cds.get_all_sidb_locations_in_nm()
-    print(all_positions_nm)
-    layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+    # Loop through each gate in the list
+    for gate, tt in gates:
+        print(f"Processing gate: {gate}")
 
-    param_types = {
-        'anneal_cycles': int,
-        'T_e_inv_point': float,
-        'v_freeze_end_point': float,
-        'num_instances': int,
-        'result_queue_factor': int,
-        'result_queue_size': int,
-        'hop_attempt_factor': int,
-        'preanneal_cycles': int,
-        'alpha': float,
-        'T_init': float,
-        'T_min': float,
-        'v_freeze_init': float,
-        'v_freeze_threshold': float,
-        'v_freeze_reset': float,
-        'v_freeze_cycles': int,
-        'phys_validity_check_cycles': int,
-        'strategic_v_freeze_reset': bool,
-        'reset_T_during_v_freeze_reset': bool,
-        'v_freeze_step': float,
-    }
+        # Read the layout for the current gate
+        layout = read_layout(gate + ".sqd")
 
-    # Automatically set parameter values based on their type
-    param1 = 'anneal_cycles'
-    param2 = 'T_init'
+        # Initialize charge distribution surface
+        cds = charge_distribution_surface_100(layout)
 
-    if param1 in param_types:
-        param1_type = param_types[param1]
-        param1_values = np.linspace(200, 600, num=10).astype(param1_type)
+        # Convert coordinates from nm to angstroms
+        all_positions_nm = cds.get_all_sidb_locations_in_nm()
+        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
-    if param2 in param_types:
-        param2_type = param_types[param2]
-        param2_values = np.linspace(100, 10000, num=10).astype(param2_type)
+        # Perform hyperparameter tuning and calculate TTS for this gate
+        gate_tts = run_tts_measurement(
+            physical_parameters, sp,
+            layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts
+        )
 
-    # Perform hyperparameter tuning
-    hyperparameter_tuning(
-        physical_parameters,param_types, sp, param1, param1_values, param2, param2_values,
-        layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts,
-        plot_heatmap=True,  # Set to False if you don't want to plot heatmap
-        plot_3d=True        # Set to False if you don't want to plot 3D bar plot
-    )
+        # Accumulate the TTS for the current gate
+        total_tts += gate_tts
+
+        # Print the total TTS for this gate
+        print(f"Total TTS for gate '{gate}': {gate_tts:.4f} seconds")
+
+        # Additional simulation logic for input patterns can be added if needed
+        bii = bdl_input_iterator_100(layout)
+        number_input_patterns = bii.num_input_pairs()**2
+
+        for i in range(number_input_patterns):
+            layout = bii.get_layout()
+            cds = charge_distribution_surface_100(layout)
+            all_positions_nm = cds.get_all_sidb_locations_in_nm()
+            layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+
+            # Perform hyperparameter tuning and calculate TTS for this layout pattern
+            gate_tts = run_tts_measurement(
+                physical_parameters, sp,
+                layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts
+            )
+
+            total_tts += gate_tts
+            print(f"Total TTS for gate '{gate}' with input pattern {i + 1}/{number_input_patterns}: {gate_tts:.4f} seconds")
+
+            if (i == number_input_patterns - 1):
+                break
+            bii.__next__()
+
+    # After processing all gates, print the overall total TTS for the benchmark
+    print(f"\nOverall Total TTS for the entire benchmark: {total_tts:.4f} seconds")
 
 if __name__ == "__main__":
     main()
