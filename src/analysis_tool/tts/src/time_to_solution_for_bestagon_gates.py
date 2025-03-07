@@ -1,27 +1,14 @@
 import numpy as np
-import time
-import matplotlib.pyplot as plt
-from pysimanneal import simanneal
-from mnt.pyfiction import *  # Ensure this import is correct
-from datetime import datetime
 import os
-import glob
+import time
+from datetime import datetime
+from mnt.pyfiction import *  # Ensure this import is correct
+
+from pysimanneal import simanneal
+
 
 # Function to generate simulation parameters
-def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=1):
-    """
-    Initializes physical and SimAnneal simulation parameters.
-
-    Parameters:
-    - mu: Chemical potential
-    - lambda_tf: Thermal length
-    - epsilon_r: Relative permittivity
-    - num_instances: Number of instances for SimAnneal
-
-    Returns:
-    - physical_parameters: Configured physical parameters for the simulation
-    - sp: Configured SimAnneal parameters
-    """
+def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6):
     physical_parameters = sidb_simulation_parameters()
     physical_parameters.base = 2
     physical_parameters.mu_minus = mu
@@ -29,60 +16,34 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=
     physical_parameters.epsilon_r = epsilon_r
 
     sp = simanneal.SimParams()
+    sp.num_instances = 1
     sp.mu = mu
-    sp.num_instances = num_instances
-    sp.anneal_cycles = 100
+    sp.debye_length = lambda_tf
+    sp.eps_r = epsilon_r
     return physical_parameters, sp
 
+
 def read_layout(gate_name):
-    # Define the folder path relative to your current directory (src)
     folder_path = os.path.join(os.getcwd(), "../bestagon_gates")
-
     folder_file = folder_path + "/" + gate_name
-
     print(folder_file)
-
     return read_sqd_layout_100(folder_file)
 
-# Function to run QuickExact simulation
+
 def run_quickexact_simulation(layout, physical_params):
-    """
-    Runs QuickExact simulation and returns the results.
-
-    Parameters:
-    - layout: SiDB layout
-    - physical_params: Physical parameters for the simulation
-
-    Returns:
-    - result_quickexact: Result from QuickExact simulation
-    """
     quickexact_params_inst = quickexact_params()
     quickexact_params_inst.simulation_parameters = physical_params
     quickexact_params_inst.base_number_detection = automatic_base_number_detection.OFF
     result_quickexact = quickexact(layout, quickexact_params_inst)
     return result_quickexact
 
-# Function to run SimAnneal simulations for a given set of parameters
+
 def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations=100):
-    """
-    Runs SimAnneal simulations and collects results.
-
-    Parameters:
-    - sp: SimAnneal parameters
-    - layout: SiDB layout
-    - physical_parameters: Physical parameters for the simulation
-    - layout_coordinates_angstrom: Coordinates of the layout in Angstroms
-    - num_simulations: Number of SimAnneal simulations to run
-
-    Returns:
-    - all_sa_solution: List of simulation results
-    """
     sp.set_db_locs(layout_coordinates_angstrom)
     all_sa_solution = []
 
     for _ in range(num_simulations):
         sa = simanneal.SimAnneal(sp)
-
         start_time = time.time()
         sa.invokeSimAnneal()
         simulation_runtime_sa = time.time() - start_time
@@ -92,12 +53,12 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
         pyfiction_simanneal_results.algorithm_name = "simanneal"
         pyfiction_simanneal_results.simulation_runtime = simulation_runtime_sa
 
-        # Gather charge distributions
         all_cds_solutions = []
         for res in results:
             cds_solution = charge_distribution_surface_100(layout, physical_parameters)
             for c, bit in enumerate(res.config):
                 cds_solution.assign_charge_state_by_cell_index(c, sign_to_charge_state(bit))
+                cds_solution.update_after_charge_change()
             all_cds_solutions.append(cds_solution)
 
         pyfiction_simanneal_results.charge_distributions = all_cds_solutions
@@ -105,116 +66,156 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
 
     return all_sa_solution
 
-# Function to calculate time-to-solution (TTS) statistics
-def calculate_tts(result_quickexact, all_sa_solution):
-    """
-    Calculates the time-to-solution (TTS) from the results of SimAnneal simulations.
 
-    Parameters:
-    - result_quickexact: Result from QuickExact simulation
-    - all_sa_solution: List of SimAnneal simulation results
-
-    Returns:
-    - time_to_solution: Time-to-solution statistic
-    """
+def calculate_tts_simanneal(result_quickexact, all_sa_solution):
     st = time_to_solution_stats()
     time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.999, st)
     return st.time_to_solution
 
-# Function to plot TTS heatmap and/or 3D bar plot
-def plot_tts(tts_data, param1_values, param2_values, param1_name, param2_name, plot_heatmap=True, plot_3d=False):
-    """
-    Plots and saves a heatmap and/or a 3D bar plot of the time-to-solution (TTS) data.
 
-    Parameters:
-    - tts_data: 2D array of TTS values
-    - param1_values: List of values for the first parameter
-    - param2_values: List of values for the second parameter
-    - param1_name: Name of the first parameter
-    - param2_name: Name of the second parameter
-    - plot_heatmap: Boolean flag to plot heatmap
-    - plot_3d: Boolean flag to plot 3D bar plot
-    """
-    # Get current time in the format YYYYMMDD_HHMMSS
-    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+def run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom, param_grid,
+                              num_simulations=100):
+    best_tts = float('inf')
+    best_params = None
 
-    if plot_heatmap:
-        # Adjust figure size to account for different ranges of x and y axes
-        plt.figure(figsize=(10, 8))  # Dynamically scale figure width based on aspect ratio
-
-        plt.imshow(tts_data, cmap='viridis', interpolation='nearest', origin='lower',
-                   extent=[param1_values[0], param1_values[-1], param2_values[0], param2_values[-1]],
-                   aspect='auto')  # 'auto' stretches to fit, or use 'equal' for proportional axes
-
-        plt.colorbar(label='Time-to-Solution (seconds)')
-        plt.xlabel(param1_name)
-        plt.ylabel(param2_name)
-        plt.title(f'Time-to-Solution Heatmap for {param1_name} and {param2_name}')
-
-        plt.tight_layout()  # Ensures everything fits in the figure
-        plt.savefig(f'plots/tts_heatmap_{param1_name}_{param2_name}_{current_time}.png')
-        plt.show()
-
-    if plot_3d:
-        X, Y = np.meshgrid(param1_values, param2_values)
-        fig = plt.figure(figsize=(12, 8))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.bar3d(X.flatten(), Y.flatten(), np.zeros_like(X.flatten()),
-                 dx=(param1_values[-1] - param1_values[0]) / len(param1_values),
-                 dy=(param2_values[-1] - param2_values[0]) / len(param2_values),
-                 dz=tts_data.T.flatten(), color='c', alpha=0.7)
-
-        ax.set_xlabel(param1_name)
-        ax.set_ylabel(param2_name)
-        ax.set_zlabel('Time-to-Solution (seconds)')
-        ax.set_title(f'Time-to-Solution 3D Bar Plot for {param1_name} and {param2_name}')
-        plt.savefig(f'plots/tts_3d_plot_{param1_name}_{param2_name}_{current_time}.png')
-        plt.show()
-
-# Main function for hyperparameter tuning
-# Function for hyperparameter tuning with TTS threshold
-def run_tts_measurement(physical_parameters, sp, layout, layout_coordinates_angstrom, num_simulations):
-    """
-    Performs hyperparameter tuning by running simulations with different parameter values.
-    Aborts if TTS exceeds a given threshold.
-
-    Parameters:
-    - physical_parameters: Physical parameters for the simulation
-    - sp: SimAnneal parameters
-    - param1: Name of the first parameter to tune
-    - param1_values: List of values for the first parameter
-    - param2: Name of the second parameter to tune
-    - param2_values: List of values for the second parameter
-    - layout: SiDB layout
-    - layout_coordinates_angstrom: Coordinates of the layout in Angstroms
-    - num_simulations: Number of SimAnneal simulations to determine TTS
-    - tts_threshold: Threshold value for TTS to abort the simulation
-    - plot_heatmap: Boolean flag to plot heatmap
-    - plot_3d: Boolean flag to plot 3D bar plot
-    """
     result_quickexact = run_quickexact_simulation(layout, physical_parameters)
 
-    # Run the SimAnneal simulation
-    all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations)
+    for T_init in param_grid['T_init']:
+        for T_min in param_grid['T_min']:
+            for alpha in param_grid['alpha']:
+                for anneal_cycles in param_grid['anneal_cycles']:
+                    sp.T_init = T_init
+                    sp.T_min = T_min
+                    sp.alpha = alpha
+                    sp.anneal_cycles = anneal_cycles
 
-    # Calculate TTS for the current (param1, param2) combination
-    tts_value = calculate_tts(result_quickexact, all_sa_solution)
+                    all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters,
+                                                               layout_coordinates_angstrom, num_simulations)
+                    tts_value = calculate_tts_simanneal(result_quickexact, all_sa_solution)
 
-    return tts_value
+                    # print(
+                    #     f"Params: T_init={T_init}, T_min={T_min}, alpha={alpha}, anneal_cycles={anneal_cycles} => TTS={tts_value:.4f}")
+
+                    if tts_value < best_tts:
+                        best_tts = tts_value
+                        best_params = {
+                            'T_init': T_init,
+                            'T_min': T_min,
+                            'alpha': alpha,
+                            'anneal_cycles': anneal_cycles
+                        }
+
+    return best_params, best_tts
+
+
+def run_grid_search_quicksim(layout, quicksim_params, param_grid):
+
+    best_tts = float('inf')
+    best_params = None
+
+    for alpha in param_grid['alpha']:
+        for iteration_steps in param_grid['iteration_steps']:
+            quicksim_params.alpha = alpha
+            quicksim_params.iteration_steps = iteration_steps
+
+            tts_stats_quicksim = time_to_solution_stats()
+            time_to_solution(layout, quicksim_params, time_to_solution_params(), tts_stats_quicksim)
+            tts_value_quicksim = tts_stats_quicksim.time_to_solution
+            #print(f"TTS QuickSim={tts_value_quicksim:.4f}")
+            #print(f"Params: alpha={alpha}, iteration_steps={iteration_steps} => TTS={tts_value_quicksim:.4f}")
+
+            if tts_value_quicksim < best_tts:
+                best_tts = tts_value_quicksim
+                best_params = {
+                    'alpha': alpha,
+                    'iteration_steps': iteration_steps
+                }
+
+    return best_params, best_tts
+
+
+def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout, layout_coordinates_angstrom,
+                                                  param_grid, num_simulations=100):
+    total_tts = 0
+    """
+    Enumerates through input patterns and performs simulations.
+    """
+    cds = charge_distribution_surface_100(layout)
+    all_positions_nm = cds.get_all_sidb_locations_in_nm()
+    layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+
+    best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
+                                                      param_grid, num_simulations)
+
+    print(f"Best parameters (no input): {best_params}")
+    print(f"Best TTS (no input): {best_tts:.4f} seconds")
+
+    total_tts += best_tts
+
+    bii = bdl_input_iterator_100(layout)
+    number_input_patterns = bii.num_input_pairs() ** 2
+
+    for i in range(number_input_patterns):
+        layout = bii.get_layout()
+        cds = charge_distribution_surface_100(layout)
+        all_positions_nm = cds.get_all_sidb_locations_in_nm()
+        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+
+        best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
+                                                          param_grid, num_simulations)
+
+        print(f"Input pattern {i + 1}/{number_input_patterns}:")
+        print(f"Best parameters: {best_params}")
+        print(f"Best TTS: {best_tts:.4f} seconds")
+
+        total_tts += best_tts
+
+        if (i == number_input_patterns - 1):
+            break
+        bii.__next__()
+
+    return total_tts
+
+
+def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, param_grid_quicksim):
+    """
+    Enumerates through input patterns and performs simulations.
+    """
+    quicksim_param = quicksim_params()
+    quicksim_param.number_threads = 1
+    quicksim_param.simulation_parameters = physical_parameters
+
+    total_tts_quicksim = 0
+    best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
+    total_tts_quicksim += best_tts
+
+    print(f"Best parameters (no input): {best_params}")
+    print(f"Best TTS (no input): {best_tts:.4f} seconds")
+
+    bii = bdl_input_iterator_100(layout)
+    number_input_patterns = bii.num_input_pairs() ** 2
+
+    for i in range(number_input_patterns):
+        layout = bii.get_layout()
+
+        best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
+
+        print(f"Input pattern {i + 1}/{number_input_patterns}:")
+        print(f"Best parameters: {best_params}")
+        print(f"Best TTS: {best_tts:.4f} seconds")
+
+        total_tts_quicksim += best_tts
+
+        if (i == number_input_patterns - 1):
+            break
+        bii.__next__()
+
+    return total_tts_quicksim
 
 
 def main():
-    """
-    Main function to set up parameters, generate layout, and perform hyperparameter tuning.
-    """
-    # Set up layout parameters and physical properties
     physical_parameters, sp = initialize_simulation()
 
-    number_of_simanneal_simulation_runs_to_determine_tts = 1000
-
-    total_tts = 0  # Initialize the overall total TTS
-
-    # List of gates and their corresponding truth tables
     gates = [
         ("and", create_and_tt()),
         ("or", create_or_tt()),
@@ -227,57 +228,44 @@ def main():
         ("ha", create_half_adder_tt())
     ]
 
-    # Loop through each gate in the list
-    for gate, tt in gates:
+    param_grid = {
+        'T_init': np.linspace(1000, 5000, 5).tolist(),
+        'T_min': np.linspace(1, 50, 5).tolist(),
+        'alpha': np.linspace(0.6, 0.99, 5).tolist(),
+        'anneal_cycles': np.linspace(100, 3000, 5).astype(int).tolist()
+    }
+
+    param_grid_quicksim = {
+        'alpha': np.linspace(0.6, 0.99, 10).tolist(),
+        'iteration_steps': np.linspace(10, 200, 10).astype(int).tolist()
+    }
+
+    final_tts_simanneal = 0
+    final_tts_quicksim = 0
+
+
+    for gate, _ in gates:
         print(f"Processing gate: {gate}")
-
-        # Read the layout for the current gate
         layout = read_layout(gate + ".sqd")
-
-        # Initialize charge distribution surface
         cds = charge_distribution_surface_100(layout)
-
-        # Convert coordinates from nm to angstroms
         all_positions_nm = cds.get_all_sidb_locations_in_nm()
         layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
-        # Perform hyperparameter tuning and calculate TTS for this gate
-        gate_tts = run_tts_measurement(
-            physical_parameters, sp,
-            layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts
-        )
+        total_tts = enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout,
+                                                                  layout_coordinates_angstrom, param_grid,
+                                                                  num_simulations=100)
+        total_tts_quicksim = enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters,
+                                                                          param_grid_quicksim)
 
-        # Accumulate the TTS for the current gate
-        total_tts += gate_tts
+        final_tts_simanneal += total_tts
+        final_tts_quicksim += total_tts_quicksim
 
-        # Print the total TTS for this gate
-        print(f"Total TTS for gate '{gate}': {gate_tts:.4f} seconds")
+        print(f"Total Best TTS for gate '{gate}': {total_tts:.4f} seconds")
+        print(f"Total TTS QuickSim for gate '{gate}': {total_tts_quicksim:.4f} seconds")
 
-        # Additional simulation logic for input patterns can be added if needed
-        bii = bdl_input_iterator_100(layout)
-        number_input_patterns = bii.num_input_pairs()**2
+    print(f"FINAL TTS SimAnneal: {final_tts_simanneal:.4f} seconds")
+    print(f"FINAL TTS QuickSim: {final_tts_quicksim:.4f} seconds")
 
-        for i in range(number_input_patterns):
-            layout = bii.get_layout()
-            cds = charge_distribution_surface_100(layout)
-            all_positions_nm = cds.get_all_sidb_locations_in_nm()
-            layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
-
-            # Perform hyperparameter tuning and calculate TTS for this layout pattern
-            gate_tts = run_tts_measurement(
-                physical_parameters, sp,
-                layout, layout_coordinates_angstrom, number_of_simanneal_simulation_runs_to_determine_tts
-            )
-
-            total_tts += gate_tts
-            print(f"Total TTS for gate '{gate}' with input pattern {i + 1}/{number_input_patterns}: {gate_tts:.4f} seconds")
-
-            if (i == number_input_patterns - 1):
-                break
-            bii.__next__()
-
-    # After processing all gates, print the overall total TTS for the benchmark
-    print(f"\nOverall Total TTS for the entire benchmark: {total_tts:.4f} seconds")
 
 if __name__ == "__main__":
     main()
