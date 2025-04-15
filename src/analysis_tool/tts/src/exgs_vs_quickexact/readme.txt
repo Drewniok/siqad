@@ -1,6 +1,6 @@
 28th of March:
 
-First, go to plugins/simmaneal and run the following commands:
+First, go to plugins/simanneal and run the following commands:
 
 1.) pip install scikit-build
 2.) python3 setup.py build
