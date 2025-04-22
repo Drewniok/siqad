@@ -3,220 +3,123 @@ import os
 import time
 from datetime import datetime
 from mnt.pyfiction import *  # Ensure this import is correct
+import pyegs.exhaustive_gs as egs
 
-from pysimanneal import simanneal
-
-
-# Function to generate simulation parameters
+# Initialize simulation parameters
 def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6):
-    physical_parameters = sidb_simulation_parameters()
-    physical_parameters.base = 2
-    physical_parameters.mu_minus = mu
-    physical_parameters.lambda_tf = lambda_tf
-    physical_parameters.epsilon_r = epsilon_r
+    """Sets up physical and simulation parameters."""
+    physical_params = sidb_simulation_parameters()
+    physical_params.base = 2
+    physical_params.mu_minus = mu
+    physical_params.lambda_tf = lambda_tf
+    physical_params.epsilon_r = epsilon_r
 
-    sp = simanneal.SimParams()
-    sp.num_instances = 1
-    sp.mu = mu
-    sp.debye_length = lambda_tf
-    sp.eps_r = epsilon_r
-    return physical_parameters, sp
+    sim_params = egs.SimParams()
+    sim_params.base = 2
+    sim_params.num_instances = 1
+    sim_params.mu = mu
+    sim_params.debye_length = lambda_tf
+    sim_params.eps_r = epsilon_r
 
+    return physical_params, sim_params
 
+# Load gate layout from file
 def read_layout(gate_name):
-    folder_path = os.path.join(os.getcwd(), "../bestagon_gates")
-    folder_file = folder_path + "/" + gate_name
-    print(folder_file)
-    return read_sqd_layout_100(folder_file)
+    """Reads a .sqd layout file for the specified gate."""
+    folder_path = os.path.join(os.getcwd(), "../../bestagon_gates")
+    file_path = os.path.join(folder_path, gate_name)
+    print(f"Loading layout from: {file_path}")
+    return read_sqd_layout_100(file_path)
 
-
+# Run QuickExact simulation
 def run_quickexact_simulation(layout, physical_params):
+    """Runs QuickExact simulation on a given layout and parameters."""
     quickexact_params_inst = quickexact_params()
     quickexact_params_inst.simulation_parameters = physical_params
     quickexact_params_inst.base_number_detection = automatic_base_number_detection.OFF
-    result_quickexact = quickexact(layout, quickexact_params_inst)
-    return result_quickexact
+    return quickexact(layout, quickexact_params_inst)
 
+# Run exhaustive GS simulation
+def run_exgs_simulation(sim_params, layout_coordinates_angstrom):
+    """Runs Exhaustive GS (ExGS) simulation."""
+    sim_params.set_db_locs(layout_coordinates_angstrom)
 
-def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations=100):
-    sp.set_db_locs(layout_coordinates_angstrom)
-    all_sa_solution = []
+    sa = egs.EGS(sim_params)
+    start_time = time.time()
+    sa.invoke()
+    runtime = time.time() - start_time
 
-    for _ in range(num_simulations):
-        sa = simanneal.SimAnneal(sp)
-        start_time = time.time()
-        sa.invokeSimAnneal()
-        simulation_runtime_sa = time.time() - start_time
+    results = sidb_simulation_result_100()
+    results.algorithm_name = "exgs"
+    results.simulation_runtime = runtime
 
-        results = sa.suggested_gs_results()
-        pyfiction_simanneal_results = sidb_simulation_result_100()
-        pyfiction_simanneal_results.algorithm_name = "simanneal"
-        pyfiction_simanneal_results.simulation_runtime = simulation_runtime_sa
+    return results
 
-        all_cds_solutions = []
-        for res in results:
-            cds_solution = charge_distribution_surface_100(layout, physical_parameters)
-            for c, bit in enumerate(res.config):
-                cds_solution.assign_charge_state_by_cell_index(c, sign_to_charge_state(bit))
-                cds_solution.update_after_charge_change()
-            all_cds_solutions.append(cds_solution)
-
-        pyfiction_simanneal_results.charge_distributions = all_cds_solutions
-        all_sa_solution.append(pyfiction_simanneal_results)
-
-    return all_sa_solution
-
-
-def calculate_tts_simanneal(result_quickexact, all_sa_solution):
-    st = time_to_solution_stats()
-    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.999, st)
-    return st.time_to_solution
-
-
-def run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom, param_grid,
-                              num_simulations=100):
-    best_tts = float('inf')
-    best_params = None
-
-    result_quickexact = run_quickexact_simulation(layout, physical_parameters)
-
-    for T_init in param_grid['T_init']:
-        for T_min in param_grid['T_min']:
-            for alpha in param_grid['alpha']:
-                for anneal_cycles in param_grid['anneal_cycles']:
-                    sp.T_init = T_init
-                    sp.T_min = T_min
-                    sp.alpha = alpha
-                    sp.anneal_cycles = anneal_cycles
-
-                    all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters,
-                                                               layout_coordinates_angstrom, num_simulations)
-                    tts_value = calculate_tts_simanneal(result_quickexact, all_sa_solution)
-
-                    # print(
-                    #     f"Params: T_init={T_init}, T_min={T_min}, alpha={alpha}, anneal_cycles={anneal_cycles} => TTS={tts_value:.4f}")
-
-                    if tts_value < best_tts:
-                        best_tts = tts_value
-                        best_params = {
-                            'T_init': T_init,
-                            'T_min': T_min,
-                            'alpha': alpha,
-                            'anneal_cycles': anneal_cycles
-                        }
-
-    return best_params, best_tts
-
-
-def run_grid_search_quicksim(layout, quicksim_params, param_grid):
-
-    best_tts = float('inf')
-    best_params = None
-
-    for alpha in param_grid['alpha']:
-        for iteration_steps in param_grid['iteration_steps']:
-            quicksim_params.alpha = alpha
-            quicksim_params.iteration_steps = iteration_steps
-
-            tts_stats_quicksim = time_to_solution_stats()
-            time_to_solution(layout, quicksim_params, time_to_solution_params(), tts_stats_quicksim)
-            tts_value_quicksim = tts_stats_quicksim.time_to_solution
-            #print(f"TTS QuickSim={tts_value_quicksim:.4f}")
-            #print(f"Params: alpha={alpha}, iteration_steps={iteration_steps} => TTS={tts_value_quicksim:.4f}")
-
-            if tts_value_quicksim < best_tts:
-                best_tts = tts_value_quicksim
-                best_params = {
-                    'alpha': alpha,
-                    'iteration_steps': iteration_steps
-                }
-
-    return best_params, best_tts
-
-
-def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout, layout_coordinates_angstrom,
-                                                  param_grid, num_simulations=100):
-    total_tts = 0
-    """
-    Enumerates through input patterns and performs simulations.
-    """
+# Simulate all input patterns with ExGS
+def simulate_exgs_inputs(sim_params, layout):
+    """Enumerates input patterns and simulates using ExGS."""
+    total_runtime = 0.0
     cds = charge_distribution_surface_100(layout)
-    all_positions_nm = cds.get_all_sidb_locations_in_nm()
-    layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+    layout_coordinates_angstrom = [
+        [pos[0] * 10, pos[1] * 10] for pos in cds.get_all_sidb_locations_in_nm()
+    ]
 
-    best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
-                                                      param_grid, num_simulations)
-
-    print(f"Best parameters (no input): {best_params}")
-    print(f"Best TTS (no input): {best_tts:.4f} seconds")
-
-    total_tts += best_tts
+    egs_results = run_exgs_simulation(sim_params, layout_coordinates_angstrom)
+    total_runtime += egs_results.simulation_runtime.total_seconds()
 
     bii = bdl_input_iterator_100(layout)
-    number_input_patterns = bii.num_input_pairs() ** 2
+    num_patterns = bii.num_input_pairs() ** 2
 
-    for i in range(number_input_patterns):
+    for i in range(num_patterns + 1):
         layout = bii.get_layout()
         cds = charge_distribution_surface_100(layout)
-        all_positions_nm = cds.get_all_sidb_locations_in_nm()
-        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+        layout_coordinates_angstrom = [
+            [pos[0] * 10, pos[1] * 10] for pos in cds.get_all_sidb_locations_in_nm()
+        ]
 
-        best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
-                                                          param_grid, num_simulations)
+        egs_results = run_exgs_simulation(sim_params, layout_coordinates_angstrom)
+        total_runtime += egs_results.simulation_runtime.total_seconds()
 
-        print(f"Input pattern {i + 1}/{number_input_patterns}:")
-        print(f"Best parameters: {best_params}")
-        print(f"Best TTS: {best_tts:.4f} seconds")
-
-        total_tts += best_tts
-
-        if (i == number_input_patterns - 1):
+        if num_patterns == 1 and i == num_patterns:
             break
+        elif i == num_patterns - 1:
+            break
+
         bii.__next__()
 
-    return total_tts
+    return total_runtime
 
+# Simulate all input patterns with QuickExact
+def simulate_quickexact_inputs(layout, physical_params):
+    """Enumerates input patterns and simulates using QuickExact."""
+    total_runtime = 0.0
 
-def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, param_grid_quicksim):
-    """
-    Enumerates through input patterns and performs simulations.
-    """
-    quicksim_param = quicksim_params()
-    quicksim_param.number_threads = 1
-    quicksim_param.simulation_parameters = physical_parameters
-
-    total_tts_quicksim = 0
-    best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
-    total_tts_quicksim += best_tts
-
-    print(f"Best parameters (no input): {best_params}")
-    print(f"Best TTS (no input): {best_tts:.4f} seconds")
+    quickexact_runtime = run_quickexact_simulation(layout, physical_params)
+    total_runtime += quickexact_runtime.simulation_runtime.total_seconds()
 
     bii = bdl_input_iterator_100(layout)
-    number_input_patterns = bii.num_input_pairs() ** 2
+    num_patterns = bii.num_input_pairs() ** 2
 
-    for i in range(number_input_patterns):
-        layout = bii.get_layout()
+    for i in range(num_patterns + 1):
+        quickexact_runtime = run_quickexact_simulation(bii.get_layout(), physical_params)
+        total_runtime += quickexact_runtime.simulation_runtime.total_seconds()
 
-        best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
-
-        print(f"Input pattern {i + 1}/{number_input_patterns}:")
-        print(f"Best parameters: {best_params}")
-        print(f"Best TTS: {best_tts:.4f} seconds")
-
-        total_tts_quicksim += best_tts
-
-        if (i == number_input_patterns - 1):
+        if num_patterns == 1 and i == num_patterns:
             break
+        elif i == num_patterns - 1:
+            break
+
         bii.__next__()
 
-    return total_tts_quicksim
+    return total_runtime
 
-
+# Main function
 def main():
-    physical_parameters, sp = initialize_simulation()
+    """Main driver for running simulations on predefined gates."""
+    physical_params, sim_params = initialize_simulation()
 
     gates = [
+        ("wire", create_id_tt()),
         ("and", create_and_tt()),
         ("or", create_or_tt()),
         ("nand", create_nand_tt()),
@@ -225,47 +128,45 @@ def main():
         ("xnor", create_xnor_tt()),
         ("hourglass", create_double_wire_tt()),
         ("cx", create_crossing_wire_tt()),
-        ("ha", create_half_adder_tt())
+        ("ha", create_half_adder_tt()),
     ]
 
-    param_grid = {
-        'T_init': np.linspace(1000, 5000, 5).tolist(),
-        'T_min': np.linspace(1, 50, 5).tolist(),
-        'alpha': np.linspace(0.6, 0.99, 5).tolist(),
-        'anneal_cycles': np.linspace(100, 3000, 5).astype(int).tolist()
-    }
+    total_exgs_time = 0
+    total_quickexact_time = 0
 
-    param_grid_quicksim = {
-        'alpha': np.linspace(0.6, 0.99, 10).tolist(),
-        'iteration_steps': np.linspace(10, 200, 10).astype(int).tolist()
-    }
+    statistics = []
 
-    final_tts_simanneal = 0
-    final_tts_quicksim = 0
+    for gate_name, _ in gates:
+        print(f"Processing gate: {gate_name}")
+        layout = read_layout(f"{gate_name}.sqd")
 
+        exgs_runtime = simulate_exgs_inputs(sim_params, layout)
+        quickexact_runtime = simulate_quickexact_inputs(layout, physical_params)
 
-    for gate, _ in gates:
-        print(f"Processing gate: {gate}")
-        layout = read_layout(gate + ".sqd")
-        cds = charge_distribution_surface_100(layout)
-        all_positions_nm = cds.get_all_sidb_locations_in_nm()
-        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+        total_exgs_time += exgs_runtime
+        total_quickexact_time += quickexact_runtime
 
-        total_tts = enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout,
-                                                                  layout_coordinates_angstrom, param_grid,
-                                                                  num_simulations=100)
-        total_tts_quicksim = enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters,
-                                                                          param_grid_quicksim)
+        print(f"ExGS Runtime for '{gate_name}': {exgs_runtime:.4f} seconds")
+        print(f"QuickExact Runtime for '{gate_name}': {quickexact_runtime:.4f} seconds")
 
-        final_tts_simanneal += total_tts
-        final_tts_quicksim += total_tts_quicksim
+        statistics.append({
+            "gate": gate_name,
+            "exgs_runtime": exgs_runtime,
+            "quickexact_runtime": quickexact_runtime,
+            "total_exgs_time": total_exgs_time,
+            "total_quickexact_time": total_quickexact_time
+        })
 
-        print(f"Total Best TTS for gate '{gate}': {total_tts:.4f} seconds")
-        print(f"Total TTS QuickSim for gate '{gate}': {total_tts_quicksim:.4f} seconds")
+    print("\n=== Detailed Runtime Statistics ===")
+    for stat in statistics:
+        print(f"Gate: {stat['gate']}")
+        print(f"  ExGS Runtime: {stat['exgs_runtime']:.4f} seconds")
+        print(f"  QuickExact Runtime: {stat['quickexact_runtime']:.4f} seconds")
+        print(f"  Cumulative Total ExGS Runtime: {stat['total_exgs_time']:.4f} seconds")
+        print(f"  Cumulative Total QuickExact Runtime: {stat['total_quickexact_time']:.4f} seconds")
 
-    print(f"FINAL TTS SimAnneal: {final_tts_simanneal:.4f} seconds")
-    print(f"FINAL TTS QuickSim: {final_tts_quicksim:.4f} seconds")
-
+    print(f"\nOverall Total ExGS Runtime: {total_exgs_time:.4f} seconds")
+    print(f"Overall Total QuickExact Runtime: {total_quickexact_time:.4f} seconds")
 
 if __name__ == "__main__":
     main()
