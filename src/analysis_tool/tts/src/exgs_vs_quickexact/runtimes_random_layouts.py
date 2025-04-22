@@ -1,10 +1,11 @@
 import numpy as np
 import time
-import py.exhaustive_gs as egs
 from mnt.pyfiction import *  # Ensure this import is correct
 from datetime import datetime
 import os
 import glob
+
+import pyegs.exhaustive_gs as egs
 
 # Function to generate simulation parameters
 def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=1):
@@ -27,7 +28,9 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_instances=
     physical_parameters.lambda_tf = lambda_tf
     physical_parameters.epsilon_r = epsilon_r
 
-    sp = egs.SimpleNamespace()
+    sp = egs.SimParams()
+    sp.base = 2
+    sp.num_instances = 1
     sp.mu = mu
     sp.num_instances = num_instances
 
@@ -54,7 +57,7 @@ def run_quickexact_simulation(layout, physical_params):
     return result_quickexact
 
 # Function to run ExGS simulations for a given set of parameters
-def run_exgs_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom):
+def run_exgs_simulation(sp, layout_coordinates_angstrom):
     """
     Runs ExGS simulations and collects results.
 
@@ -69,8 +72,6 @@ def run_exgs_simulation(sp, layout, physical_parameters, layout_coordinates_angs
     - all_sa_solution: List of simulation results
     """
     sp.set_db_locs(layout_coordinates_angstrom)
-    all_sa_solution = []
-
 
     egs_eng = egs.EGS(sp)
 
@@ -78,23 +79,11 @@ def run_exgs_simulation(sp, layout, physical_parameters, layout_coordinates_angs
     egs_eng.invoke()
     simulation_runtime = time.time() - start_time
 
-    results = egs_eng.gs_results()()
     pyfiction_exgs_results = sidb_simulation_result_100()
     pyfiction_exgs_results.algorithm_name = "simanneal"
     pyfiction_exgs_results.simulation_runtime = simulation_runtime
 
-    # Gather charge distributions
-    all_cds_solutions = []
-    for res in results:
-        cds_solution = charge_distribution_surface_100(layout, physical_parameters)
-        for c, bit in enumerate(res.config):
-            cds_solution.assign_charge_state_by_cell_index(c, sign_to_charge_state(bit))
-        all_cds_solutions.append(cds_solution)
-
-    pyfiction_simanneal_results.charge_distributions = all_cds_solutions
-    all_sa_solution.append(pyfiction_simanneal_results)
-
-    return all_sa_solution
+    return pyfiction_exgs_results
 
 
 # Main function for hyperparameter tuning
@@ -145,9 +134,10 @@ def main():
 
     # Generate layout parameters
     generate_params = generate_random_sidb_layout_params()
-    generate_params.number_of_sidbs = 12
+    generate_params.number_of_sidbs = 10
     generate_params.positive_sidbs = positive_charges.FORBIDDEN
     generate_params.coordinate_pair = ((0, 0), (20, 20))
+    generate_params.number_of_unique_generated_layouts = 15
 
     layouts = generate_multiple_random_sidb_layouts(sidb_100_lattice(), generate_params)
 
@@ -159,8 +149,11 @@ def main():
 
         layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
-        run_exgs_simulation(sp, lyt, physical_parameters, layout_coordinates_angstrom)
-        run_quickexact_simulation(lyt, physical_parameters)
+        exgs_result = run_exgs_simulation(sp, layout_coordinates_angstrom)
+        quickexact_result = run_quickexact_simulation(lyt, physical_parameters)
+
+        print(exgs_result.simulation_runtime.total_seconds())
+        print(quickexact_result.simulation_runtime.total_seconds())
 
 
 if __name__ == "__main__":

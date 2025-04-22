@@ -118,6 +118,20 @@ def main():
     """Main driver for running simulations on predefined gates."""
     physical_params, sim_params = initialize_simulation()
 
+    # gates = [
+    #     ("wire", create_id_tt()),
+    #     ("and", create_and_tt()),
+    #     ("or", create_or_tt()),
+    #     ("nand", create_nand_tt()),
+    #     ("nor", create_nor_tt()),
+    #     ("xor", create_xor_tt()),
+    #     ("xnor", create_xnor_tt()),
+    #     ("hourglass", create_double_wire_tt()),
+    #     ("cx", create_crossing_wire_tt()),
+    #     ("ha", create_half_adder_tt()),
+    # ]
+
+
     gates = [
         ("wire", create_id_tt()),
         ("and", create_and_tt()),
@@ -126,9 +140,9 @@ def main():
         ("nor", create_nor_tt()),
         ("xor", create_xor_tt()),
         ("xnor", create_xnor_tt()),
-        ("hourglass", create_double_wire_tt()),
-        ("cx", create_crossing_wire_tt()),
-        ("ha", create_half_adder_tt()),
+        #("hourglass", create_double_wire_tt()),
+        #("cx", create_crossing_wire_tt()),
+        #("ha", create_half_adder_tt()),
     ]
 
     total_exgs_time = 0
