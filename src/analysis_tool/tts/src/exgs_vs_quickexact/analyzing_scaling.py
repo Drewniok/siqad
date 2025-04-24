@@ -36,7 +36,20 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
 
     return physical_parameters, sp
 
+def time_to_solution_quicksim(layout, physical_parameters):
 
+    quicksim_param = quicksim_params()
+    quicksim_param.number_threads = 1
+    quicksim_param.simulation_parameters = physical_parameters
+    quicksim_param.alpha = 0.4
+    quicksim_param.iteration_steps = 3000
+
+    tts_stats_quicksim = time_to_solution_stats()
+    tts_params = time_to_solution_params()
+    tts_params.repetitions = 1000
+
+    time_to_solution(layout, quicksim_param, time_to_solution_params(), tts_stats_quicksim)
+    return tts_stats_quicksim.time_to_solution
 
 # Function to run QuickExact simulation
 def run_quickexact_simulation(layout, physical_params):
@@ -135,12 +148,12 @@ def main():
     physical_parameters, sp = initialize_simulation()
 
     # Generate layouts
-    layouts = generate_layouts(30, 5, 5)
+    layouts = generate_layouts(25, 5, 5)
 
     # Prepare CSV file
     with open("simulation_runtimes.csv", mode="w", newline="") as csvfile:
         csv_writer = csv.writer(csvfile)
-        csv_writer.writerow(["Layout ID", "EXGS Runtime (seconds)", "QuickExact Runtime (seconds)"])  # Header row
+        csv_writer.writerow(["Layout ID", "EXGS Runtime (seconds)", "QuickExact Runtime (seconds)", "QuickSim TTS"])  # Header row
 
         for layout_id, lyt in enumerate(layouts, start=1):
             print(lyt.num_cells())
@@ -160,12 +173,14 @@ def main():
 
             exgs_runtime = exgs_result.simulation_runtime.total_seconds()
             quickexact_runtime = quickexact_result.simulation_runtime.total_seconds()
+            tts_quicksim = time_to_solution_quicksim(lyt, physical_parameters)
 
             print(exgs_runtime)
             print(quickexact_runtime)
+            print(tts_quicksim)
 
             # Write runtimes to CSV
-            csv_writer.writerow([layout_id, exgs_runtime, quickexact_runtime])
+            csv_writer.writerow([layout_id, exgs_runtime, quickexact_runtime, tts_quicksim])
 
 
 
