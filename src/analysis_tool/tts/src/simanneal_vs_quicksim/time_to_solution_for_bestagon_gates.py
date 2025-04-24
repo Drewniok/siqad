@@ -24,7 +24,7 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6):
 
 
 def read_layout(gate_name):
-    folder_path = os.path.join(os.getcwd(), "../bestagon_gates")
+    folder_path = os.path.join(os.getcwd(), "../../bestagon_gates")
     folder_file = folder_path + "/" + gate_name
     print(folder_file)
     return read_sqd_layout_100(folder_file)
@@ -38,11 +38,11 @@ def run_quickexact_simulation(layout, physical_params):
     return result_quickexact
 
 
-def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, num_simulations=100):
+def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, tts_params):
     sp.set_db_locs(layout_coordinates_angstrom)
     all_sa_solution = []
 
-    for _ in range(num_simulations):
+    for _ in range(tts_params.repetitions):
         sa = simanneal.SimAnneal(sp)
         start_time = time.time()
         sa.invokeSimAnneal()
@@ -57,7 +57,7 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
         for res in results:
             cds_solution = charge_distribution_surface_100(layout, physical_parameters)
             for c, bit in enumerate(res.config):
-                cds_solution.assign_charge_state_by_cell_index(c, sign_to_charge_state(bit))
+                cds_solution.assign_charge_state_by_index(c, sign_to_charge_state(bit))
                 cds_solution.update_after_charge_change()
             all_cds_solutions.append(cds_solution)
 
@@ -67,14 +67,14 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
     return all_sa_solution
 
 
-def calculate_tts_simanneal(result_quickexact, all_sa_solution):
+def calculate_tts_simanneal(result_quickexact, all_sa_solution, tts_params):
     st = time_to_solution_stats()
-    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, 0.999, st)
+    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, tts_params.confidence_level, st)
     return st.time_to_solution
 
 
 def run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom, param_grid,
-                              num_simulations=100):
+                              tts_params):
     best_tts = float('inf')
     best_params = None
 
@@ -90,8 +90,8 @@ def run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinate
                     sp.anneal_cycles = anneal_cycles
 
                     all_sa_solution = run_simanneal_simulation(sp, layout, physical_parameters,
-                                                               layout_coordinates_angstrom, num_simulations)
-                    tts_value = calculate_tts_simanneal(result_quickexact, all_sa_solution)
+                                                               layout_coordinates_angstrom, tts_params)
+                    tts_value = calculate_tts_simanneal(result_quickexact, all_sa_solution, tts_params)
 
                     # print(
                     #     f"Params: T_init={T_init}, T_min={T_min}, alpha={alpha}, anneal_cycles={anneal_cycles} => TTS={tts_value:.4f}")
@@ -108,7 +108,7 @@ def run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinate
     return best_params, best_tts
 
 
-def run_grid_search_quicksim(layout, quicksim_params, param_grid):
+def run_grid_search_quicksim(layout, quicksim_params, param_grid, tts_params):
 
     best_tts = float('inf')
     best_params = None
@@ -119,7 +119,7 @@ def run_grid_search_quicksim(layout, quicksim_params, param_grid):
             quicksim_params.iteration_steps = iteration_steps
 
             tts_stats_quicksim = time_to_solution_stats()
-            time_to_solution(layout, quicksim_params, time_to_solution_params(), tts_stats_quicksim)
+            time_to_solution(layout, quicksim_params, tts_params, tts_stats_quicksim)
             tts_value_quicksim = tts_stats_quicksim.time_to_solution
             #print(f"TTS QuickSim={tts_value_quicksim:.4f}")
             #print(f"Params: alpha={alpha}, iteration_steps={iteration_steps} => TTS={tts_value_quicksim:.4f}")
@@ -135,7 +135,7 @@ def run_grid_search_quicksim(layout, quicksim_params, param_grid):
 
 
 def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout, layout_coordinates_angstrom,
-                                                  param_grid, num_simulations=100):
+                                                  param_grid, tts_params):
     total_tts = 0
     """
     Enumerates through input patterns and performs simulations.
@@ -145,7 +145,7 @@ def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layou
     layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
     best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
-                                                      param_grid, num_simulations)
+                                                      param_grid, tts_params)
 
     print(f"Best parameters (no input): {best_params}")
     print(f"Best TTS (no input): {best_tts:.4f} seconds")
@@ -162,7 +162,7 @@ def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layou
         layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
         best_params, best_tts = run_grid_search_simanneal(sp, physical_parameters, layout, layout_coordinates_angstrom,
-                                                          param_grid, num_simulations)
+                                                          param_grid, tts_params.repetitions)
 
         print(f"Input pattern {i + 1}/{number_input_patterns}:")
         print(f"Best parameters: {best_params}")
@@ -177,7 +177,7 @@ def enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layou
     return total_tts
 
 
-def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, param_grid_quicksim):
+def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, param_grid_quicksim, tts_params):
     """
     Enumerates through input patterns and performs simulations.
     """
@@ -186,7 +186,7 @@ def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, pa
     quicksim_param.simulation_parameters = physical_parameters
 
     total_tts_quicksim = 0
-    best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
+    best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim, tts_params)
     total_tts_quicksim += best_tts
 
     print(f"Best parameters (no input): {best_params}")
@@ -198,7 +198,7 @@ def enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters, pa
     for i in range(number_input_patterns):
         layout = bii.get_layout()
 
-        best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim)
+        best_params, best_tts = run_grid_search_quicksim(layout, quicksim_param, param_grid_quicksim, tts_params)
 
         print(f"Input pattern {i + 1}/{number_input_patterns}:")
         print(f"Best parameters: {best_params}")
@@ -243,6 +243,8 @@ def main():
     final_tts_simanneal = 0
     final_tts_quicksim = 0
 
+    tts_params = time_to_solution_params()
+
 
     for gate, _ in gates:
         print(f"Processing gate: {gate}")
@@ -253,9 +255,9 @@ def main():
 
         total_tts = enumerate_inputs_and_run_simulation_simanneal(physical_parameters, sp, layout,
                                                                   layout_coordinates_angstrom, param_grid,
-                                                                  num_simulations=100)
+                                                                  tts_params)
         total_tts_quicksim = enumerate_inputs_and_run_simulation_quicksim(layout, physical_parameters,
-                                                                          param_grid_quicksim)
+                                                                          param_grid_quicksim, tts_params)
 
         final_tts_simanneal += total_tts
         final_tts_quicksim += total_tts_quicksim

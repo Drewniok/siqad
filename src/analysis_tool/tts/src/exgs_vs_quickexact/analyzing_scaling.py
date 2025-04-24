@@ -7,6 +7,7 @@ import glob
 import csv
 
 import pyegs.exhaustive_gs as egs
+from pysimanneal import simanneal
 
 # Function to generate simulation parameters
 def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1):
@@ -29,27 +30,62 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
     physical_parameters.lambda_tf = lambda_tf
     physical_parameters.epsilon_r = epsilon_r
 
-    sp = egs.SimParams()
-    sp.base = 2
-    sp.mu = mu
-    sp.num_threads = num_threads
+    sp_egs = egs.SimParams()
+    sp_egs.base = 2
+    sp_egs.mu = mu
+    sp_egs.num_threads = num_threads
 
-    return physical_parameters, sp
+    sp_sa = simanneal.SimParams()
+    sp_sa.base = 2
+    sp_sa.mu = mu
+    sp_sa.num_instances = num_threads
 
-def time_to_solution_quicksim(layout, physical_parameters):
+    return physical_parameters, sp_egs, sp_sa
+
+def time_to_solution_quicksim(layout, physical_parameters, tts_params):
 
     quicksim_param = quicksim_params()
-    quicksim_param.number_threads = 1
+    quicksim_param.number_threads = 10
     quicksim_param.simulation_parameters = physical_parameters
-    quicksim_param.alpha = 0.4
-    quicksim_param.iteration_steps = 3000
+    #quicksim_param.alpha = 0.5
+    #quicksim_param.iteration_steps = 100
 
     tts_stats_quicksim = time_to_solution_stats()
-    tts_params = time_to_solution_params()
-    tts_params.repetitions = 1000
-
-    time_to_solution(layout, quicksim_param, time_to_solution_params(), tts_stats_quicksim)
+    time_to_solution(layout, quicksim_param, tts_params, tts_stats_quicksim)
     return tts_stats_quicksim.time_to_solution
+
+def calculate_tts_simanneal(result_quickexact, all_sa_solution, tts_params):
+    st = time_to_solution_stats()
+    time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, tts_params.confidence_level, st)
+    return st.time_to_solution
+
+def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, tts_params):
+    sp.set_db_locs(layout_coordinates_angstrom)
+    all_sa_solution = []
+
+    for _ in range(tts_params.repetitions):
+        sa = simanneal.SimAnneal(sp)
+        start_time = time.time()
+        sa.invokeSimAnneal()
+        simulation_runtime_sa = time.time() - start_time
+
+        results = sa.suggested_gs_results()
+        pyfiction_simanneal_results = sidb_simulation_result_100()
+        pyfiction_simanneal_results.algorithm_name = "simanneal"
+        pyfiction_simanneal_results.simulation_runtime = simulation_runtime_sa
+
+        all_cds_solutions = []
+        for res in results:
+            cds_solution = charge_distribution_surface_100(layout, physical_parameters)
+            for c, bit in enumerate(res.config):
+                cds_solution.assign_charge_state_by_index(c, sign_to_charge_state(bit))
+                cds_solution.update_after_charge_change()
+            all_cds_solutions.append(cds_solution)
+
+        pyfiction_simanneal_results.charge_distributions = all_cds_solutions
+        all_sa_solution.append(pyfiction_simanneal_results)
+
+    return all_sa_solution
 
 # Function to run QuickExact simulation
 def run_quickexact_simulation(layout, physical_params):
@@ -140,15 +176,19 @@ def generate_layouts(final_number_of_sidbs=20, x_distance=4, y_distance=4):
 
 
 def main():
+
+    tts_params = time_to_solution_params()
+    tts_params.repetitions = 1000
+    tts_params.engine = exact_sidb_simulation_engine.CLUSTERCOMPLETE
     """
     Main function to set up parameters, generate layout, and perform hyperparameter tuning.
     Writes simulation runtimes to a CSV file.
     """
     # Set up layout parameters and physical properties
-    physical_parameters, sp = initialize_simulation()
+    physical_parameters, sp_egs, sp_sa = initialize_simulation()
 
     # Generate layouts
-    layouts = generate_layouts(25, 5, 5)
+    layouts = generate_layouts(40, 3, 3)
 
     # Prepare CSV file
     with open("simulation_runtimes.csv", mode="w", newline="") as csvfile:
@@ -164,20 +204,27 @@ def main():
             layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
 
             # Run simulations
-            exgs_result = run_exgs_simulation(sp, layout_coordinates_angstrom)
+            #exgs_result = run_exgs_simulation(sp, layout_coordinates_angstrom)
             quickexact_result = run_quickexact_simulation(lyt, physical_parameters)
 
+            #sa_result = run_simanneal_simulation(sp_sa, lyt, physical_parameters, layout_coordinates_angstrom, tts_params)
+
+            #sa_tts = calculate_tts_simanneal(quickexact_result, sa_result, tts_params)
+
             # Extract ground state and runtimes
-            gs_results = groundstate_from_simulation_result(quickexact_result)
+            gs_results = quickexact_result.groundstates()
             print(gs_results[0])
 
-            exgs_runtime = exgs_result.simulation_runtime.total_seconds()
+            #exgs_runtime = exgs_result.simulation_runtime.total_seconds()
+            exgs_runtime = 0.0
             quickexact_runtime = quickexact_result.simulation_runtime.total_seconds()
-            tts_quicksim = time_to_solution_quicksim(lyt, physical_parameters)
+            tts_quicksim = time_to_solution_quicksim(lyt, physical_parameters, tts_params)
+            #tts_quicksim = 0.0
 
             print(exgs_runtime)
             print(quickexact_runtime)
             print(tts_quicksim)
+            #print(sa_tts)
 
             # Write runtimes to CSV
             csv_writer.writerow([layout_id, exgs_runtime, quickexact_runtime, tts_quicksim])
