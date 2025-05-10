@@ -136,24 +136,42 @@ def main():
     generate_params = generate_random_sidb_layout_params()
     generate_params.number_of_sidbs = 10
     generate_params.positive_sidbs = positive_charges.FORBIDDEN
-    generate_params.coordinate_pair = ((0, 0), (20, 20))
-    generate_params.number_of_unique_generated_layouts = 15
+    generate_params.coordinate_pair = ((0, 0), (50, 50))
+    generate_params.number_of_unique_generated_layouts = 20
 
-    layouts = generate_multiple_random_sidb_layouts(sidb_100_lattice(), generate_params)
+    for num_sidbs in np.arange(10,33):
 
-    for lyt in layouts:
-        cds = charge_distribution_surface_100(lyt)
+        print(num_sidbs)
 
-        # Convert coordinates from nm to angstroms
-        all_positions_nm = cds.get_all_sidb_locations_in_nm()
+        generate_params.number_of_sidbs = num_sidbs
 
-        layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+        if (num_sidbs == 20):
+            generate_params.coordinate_pair = ((0, 0), (30, 30))
+        elif (num_sidbs == 30):
+            generate_params.coordinate_pair = ((0, 0), (50, 50))
 
-        exgs_result = run_exgs_simulation(sp, layout_coordinates_angstrom)
-        quickexact_result = run_quickexact_simulation(lyt, physical_parameters)
+        layouts = generate_multiple_random_sidb_layouts(generate_params, sidb_100_lattice())
 
-        print(exgs_result.simulation_runtime.total_seconds())
-        print(quickexact_result.simulation_runtime.total_seconds())
+        print(layouts[0])
+        print("-------------------------")
+
+        for lyt in layouts:
+            cds = charge_distribution_surface_100(lyt)
+
+            # Convert coordinates from nm to angstroms
+            all_positions_nm = cds.get_all_sidb_locations_in_nm()
+
+            layout_coordinates_angstrom = [[pos[0] * 10, pos[1] * 10] for pos in all_positions_nm]
+
+            #exgs_result = run_exgs_simulation(sp, layout_coordinates_angstrom)
+            #quickexact_result = run_quickexact_simulation(lyt, physical_parameters)
+
+            #gs = quickexact_result.groundstates()
+            #print(gs)
+            #print(gs[0].num_negative_sidbs())
+
+            #print(exgs_result.simulation_runtime.total_seconds())
+            #print(quickexact_result.simulation_runtime.total_seconds())
 
 
 if __name__ == "__main__":
