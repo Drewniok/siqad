@@ -32,7 +32,7 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
     sp_sa = simanneal.SimParams()
     sp_sa.base = 2
     sp_sa.mu = mu
-    #sp_sa.anneal_cycles = 1000
+    sp_sa.anneal_cycles = 1000
 
     sp_sa.num_instances = num_threads
 
@@ -41,10 +41,10 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
 def time_to_solution_quicksim(layout, physical_parameters, tts_params):
 
     quicksim_param = quicksim_params()
-    quicksim_param.number_threads = 1
+    quicksim_param.number_threads = 10
     quicksim_param.simulation_parameters = physical_parameters
     quicksim_param.alpha = 0.7
-    quicksim_param.iteration_steps = 1000
+    quicksim_param.iteration_steps = 100
 
     tts_stats_quicksim = time_to_solution_stats()
     time_to_solution(layout, quicksim_param, tts_params, tts_stats_quicksim)
@@ -59,11 +59,11 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
     sp.set_db_locs(layout_coordinates_angstrom)
     all_sa_solution = []
 
-    for _ in range(10000):
+    for _ in range(100):
         sa = simanneal.SimAnneal(sp)
-        start_time = time.time()
+        start_time = time.perf_counter()
         sa.invokeSimAnneal()
-        simulation_runtime_sa = time.time() - start_time
+        simulation_runtime_sa = time.perf_counter() - start_time
 
         results = sa.suggested_gs_results()
         pyfiction_simanneal_results = sidb_simulation_result_100()
@@ -71,14 +71,20 @@ def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates
         pyfiction_simanneal_results.simulation_runtime = simulation_runtime_sa * sp.num_instances
 
         all_cds_solutions = []
+
         for res in results:
             cds_solution = charge_distribution_surface_100(layout, physical_parameters)
+            #print(len(res.config))
             for c, bit in enumerate(res.config):
                 cds_solution.assign_charge_state_by_index(c, sign_to_charge_state(bit))
                 cds_solution.update_after_charge_change()
+            #print(cds_solution)
             all_cds_solutions.append(cds_solution)
+        #print(all_cds_solutions)
 
         pyfiction_simanneal_results.charge_distributions = all_cds_solutions
+        #print(len(all_cds_solutions))
+        #print(len(pyfiction_simanneal_results.charge_distributions))
         all_sa_solution.append(pyfiction_simanneal_results)
 
     return all_sa_solution
@@ -117,7 +123,7 @@ def generate_layouts(final_number_of_sidbs=25, x_distance=4, y_distance=4):
     """
     layouts = []
 
-    for num_of_sidbs in range(1, final_number_of_sidbs + 1):  # Start with 1 SiDB, go up to final_number_of_sidbs
+    for num_of_sidbs in range(4, final_number_of_sidbs + 1):  # Start with 1 SiDB, go up to final_number_of_sidbs
         layout = sidb_100_lattice()
         sidb_count = 0
 
@@ -150,7 +156,7 @@ def main():
     Writes simulation runtimes to a CSV file.
     """
     # Set up layout parameters and physical properties
-    physical_parameters, sp_sa = initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
+    physical_parameters, sp_sa = initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=10)
 
     # Generate layouts
     layouts = generate_layouts(36, 3, 3)
@@ -172,7 +178,15 @@ def main():
 
         quickexact_result = run_quickexact_simulation(lyt, physical_parameters)
 
+        print(len(quickexact_result.charge_distributions))
+
+
         sa_result = run_simanneal_simulation(sp_sa, lyt, physical_parameters, layout_coordinates_angstrom, tts_params)
+
+        print(len(sa_result))
+
+        # for i in range(len(sa_result)):
+        #     print(len(sa_result[i].charge_distributions))
 
         sa_tts = calculate_tts_simanneal(quickexact_result, sa_result, tts_params)
 
