@@ -2,6 +2,7 @@ import numpy as np
 import os
 import time
 from datetime import datetime
+import csv
 from mnt.pyfiction import *  # Ensure this import is correct
 import pyegs.exhaustive_gs as egs
 
@@ -26,9 +27,8 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6):
 # Load gate layout from file
 def read_layout(gate_name):
     """Reads a .sqd layout file for the specified gate."""
-    folder_path = os.path.join(os.getcwd(), "../../bestagon_gates")
+    folder_path = os.path.join(os.getcwd(), "../../resources/bestagon_gates")
     file_path = os.path.join(folder_path, gate_name)
-    print(f"Loading layout from: {file_path}")
     return read_sqd_layout_100(file_path)
 
 # Run QuickExact simulation
@@ -118,31 +118,21 @@ def main():
     """Main driver for running simulations on predefined gates."""
     physical_params, sim_params = initialize_simulation()
 
-    # gates = [
-    #     ("wire", create_id_tt()),
-    #     ("and", create_and_tt()),
-    #     ("or", create_or_tt()),
-    #     ("nand", create_nand_tt()),
-    #     ("nor", create_nor_tt()),
-    #     ("xor", create_xor_tt()),
-    #     ("xnor", create_xnor_tt()),
-    #     ("hourglass", create_double_wire_tt()),
-    #     ("cx", create_crossing_wire_tt()),
-    #     ("ha", create_half_adder_tt()),
-    # ]
-
-
     gates = [
         ("wire", create_id_tt()),
-        ("and", create_and_tt()),
-        ("or", create_or_tt()),
+        ("wire_diag", create_id_tt()),
+        ("inv_diag", create_not_tt()),
+        ("inv", create_not_tt()),
+        ("fo2", create_fan_out_tt()),
         ("nand", create_nand_tt()),
         ("nor", create_nor_tt()),
+        ("and", create_and_tt()),
+        ("or", create_or_tt()),
         ("xor", create_xor_tt()),
         ("xnor", create_xnor_tt()),
-        #("hourglass", create_double_wire_tt()),
-        #("cx", create_crossing_wire_tt()),
-        #("ha", create_half_adder_tt()),
+        ("ha", create_half_adder_tt()),
+        ("cx", create_crossing_wire_tt()),
+        ("hourglass", create_double_wire_tt()),
     ]
 
     total_exgs_time = 0
@@ -159,25 +149,47 @@ def main():
 
         total_exgs_time += exgs_runtime
         total_quickexact_time += quickexact_runtime
-
+        num_cells = (bdl_input_iterator_100(layout)).get_layout().num_cells()
+        print(f"Number of SiDBs: {num_cells}")
         print(f"ExGS Runtime for '{gate_name}': {exgs_runtime:.4f} seconds")
         print(f"QuickExact Runtime for '{gate_name}': {quickexact_runtime:.4f} seconds")
+        print(f"Ratio ExGS/QuickExact for '{gate_name}': {exgs_runtime / quickexact_runtime:.4f}")
+        print("------------------------------")
 
         statistics.append({
             "gate": gate_name,
+            "num_sidbs": num_cells,
             "exgs_runtime": exgs_runtime,
             "quickexact_runtime": quickexact_runtime,
-            "total_exgs_time": total_exgs_time,
-            "total_quickexact_time": total_quickexact_time
+            "ratio": exgs_runtime / quickexact_runtime,
         })
 
-    print("\n=== Detailed Runtime Statistics ===")
+    from datetime import datetime
+
+    # Generate file name with current date
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    file_name = f"simulation_results_{current_date}.csv"
+
+    with open(file_name, "w", newline="") as csvfile:
+        fieldnames = ["Gate", "Number of SiDBs", "ExGS Runtime (s)", "QuickExact Runtime (s)", "Ratio (ExGS/QuickExact)"]
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+        writer.writeheader()
+        for stat in statistics:
+            writer.writerow({
+                "Gate": stat["gate"],
+                "Number of SiDBs": stat["num_sidbs"],
+                "ExGS Runtime (s)": stat["exgs_runtime"],
+                "QuickExact Runtime (s)": stat["quickexact_runtime"],
+                "Ratio (ExGS/QuickExact)": stat["ratio"],
+            })
+
+    print(f"\n=== Detailed Runtime Statistics ===")
     for stat in statistics:
         print(f"Gate: {stat['gate']}")
         print(f"  ExGS Runtime: {stat['exgs_runtime']:.4f} seconds")
         print(f"  QuickExact Runtime: {stat['quickexact_runtime']:.4f} seconds")
-        print(f"  Cumulative Total ExGS Runtime: {stat['total_exgs_time']:.4f} seconds")
-        print(f"  Cumulative Total QuickExact Runtime: {stat['total_quickexact_time']:.4f} seconds")
+        print(f"  Ratio ExGS/QuickExact: {stat['ratio']:.4f}\n")
 
     print(f"\nOverall Total ExGS Runtime: {total_exgs_time:.4f} seconds")
     print(f"Overall Total QuickExact Runtime: {total_quickexact_time:.4f} seconds")
