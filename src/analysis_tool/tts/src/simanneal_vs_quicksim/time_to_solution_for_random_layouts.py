@@ -85,21 +85,8 @@ def run_grid_search_simanneal(sp, physical_parameters, quickexact_results, layou
 
     return results
 
-def main():
-    # Initialize simulation parameters
-    physical_parameters, sp = initialize_simulation()
-
-    # Define parameter grid and TTS parameters
-    param_grid = {
-        'anneal_cycles': [1000, 10000]
-    }
-    tts_params = time_to_solution_params()
-    tts_params.repetitions = 100
-
-    # Directory containing gate layout files
-    gate_dir = "../../resources/2_in_1_out/sqd"
+def process_gate_directory(gate_dir, physical_parameters, sp, param_grid, tts_params, gate_type):
     layout_files = [f for f in os.listdir(gate_dir) if f.endswith('.sqd')]
-
     final_simanneal_tts = {ac: 0 for ac in param_grid['anneal_cycles']}
     final_simanneal_acc = {ac: [] for ac in param_grid['anneal_cycles']}
     final_quicksim_tts = 0
@@ -107,7 +94,7 @@ def main():
 
     for layout_file in layout_files:
         gate_name = os.path.splitext(layout_file)[0]
-        print(f"\nProcessing gate: {gate_name}")
+        print(f"\nProcessing gate: {gate_name} ({gate_type})")
 
         # Load layout
         layout_path = os.path.join(gate_dir, layout_file)
@@ -137,8 +124,6 @@ def main():
             if result is not None:
                 quicksim_solution.append(result)
 
-        #print(len(quicksim_solution))
-
         quicksim_tts_value, quicksim_acc_value = calculate_tts_quicksim(result_quickexact, quicksim_solution, tts_params)
 
         # Aggregate results
@@ -154,14 +139,65 @@ def main():
         print(f"Gate '{gate_name}' QuickSim: Total TTS = {quicksim_tts_value:.4f} seconds, "
               f"Average Accuracy = {quicksim_acc_value:.4f}")
 
-    # Final summary
-    print("\nFinal Summary Across All Gates:")
-    for ac in param_grid['anneal_cycles']:
-        final_avg_acc = np.mean(final_simanneal_acc[ac])
-        print(f"SimAnneal (anneal_cycles={ac}): Total TTS = {final_simanneal_tts[ac]:.4f} seconds, "
-              f"Average Accuracy = {final_avg_acc:.4f}")
-    final_avg_quicksim_acc = np.mean(final_quicksim_acc)
-    print(f"QuickSim: Total TTS = {final_quicksim_tts:.4f} seconds, Average Accuracy = {final_avg_quicksim_acc:.4f}")
+    # Calculate averages
+    final_avg_simanneal_acc = {ac: np.mean(final_simanneal_acc[ac]) for ac in param_grid['anneal_cycles']}
+    final_avg_quicksim_acc = np.mean(final_quicksim_acc) if final_quicksim_acc else 0
+
+    return {
+        'simanneal_tts': final_simanneal_tts,
+        'simanneal_acc': final_avg_simanneal_acc,
+        'quicksim_tts': final_quicksim_tts,
+        'quicksim_acc': final_avg_quicksim_acc
+    }
+
+def main():
+    # Initialize simulation parameters
+    physical_parameters, sp = initialize_simulation()
+
+    # Define parameter grid and TTS parameters
+    param_grid = {
+        'anneal_cycles': [1000, 10000]
+    }
+    tts_params = time_to_solution_params()
+    tts_params.repetitions = 10000
+
+    # Directories for gate layouts
+    gate_dirs = {
+        '2_in_1_out': "../../resources/2_in_1_out/sqd",
+        '2_in_2_out': "../../resources/2_in_2_out/sqd"  # Adjust this path as needed
+    }
+
+    # Store results for each gate type
+    all_results = {}
+
+    # Process each gate directory
+    for gate_type, gate_dir in gate_dirs.items():
+        print(f"\nProcessing gate type: {gate_type}")
+        if not os.path.exists(gate_dir):
+            print(f"Directory {gate_dir} does not exist. Skipping {gate_type}.")
+            continue
+        results = process_gate_directory(gate_dir, physical_parameters, sp, param_grid, tts_params, gate_type)
+        all_results[gate_type] = results
+
+        # Print summary for this gate type
+        print(f"\nSummary for {gate_type}:")
+        for ac in param_grid['anneal_cycles']:
+            print(f"SimAnneal (anneal_cycles={ac}): Total TTS = {results['simanneal_tts'][ac]:.4f} seconds, "
+                  f"Average Accuracy = {results['simanneal_acc'][ac]:.4f}")
+        print(f"QuickSim: Total TTS = {results['quicksim_tts']:.4f} seconds, "
+              f"Average Accuracy = {results['quicksim_acc']:.4f}")
+
+    # Print comparison of results
+    print("\nComparison of 2_in_1_out and 2_in_2_out:")
+    for gate_type in all_results:
+        print(f"\n{gate_type}:")
+        for ac in param_grid['anneal_cycles']:
+            tts = all_results[gate_type]['simanneal_tts'].get(ac, 0)
+            acc = all_results[gate_type]['simanneal_acc'].get(ac, 0)
+            print(f"  SimAnneal (anneal_cycles={ac}): TTS = {tts:.4f} seconds, Accuracy = {acc:.4f}")
+        tts = all_results[gate_type]['quicksim_tts']
+        acc = all_results[gate_type]['quicksim_acc']
+        print(f"  QuickSim: TTS = {tts:.4f} seconds, Accuracy = {acc:.4f}")
 
 if __name__ == "__main__":
     main()

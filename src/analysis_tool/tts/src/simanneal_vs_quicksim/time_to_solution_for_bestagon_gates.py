@@ -116,10 +116,16 @@ def enumerate_inputs_and_run_simulation(physical_parameters, sp, layout, layout_
     quicksim_params_inst = quicksim_params()
     quicksim_params_inst.number_threads = sp.num_instances
     quicksim_params_inst.simulation_parameters = physical_parameters
+    quicksim_params_inst.alpha = 0.7
+    quicksim_params_inst.iteration_steps = 80
 
     quicksim_solution = []
-    for num_inter in range(tts_params.repetitions):
-        quicksim_solution.append(quicksim(layout, quicksim_params_inst))
+    for _ in range(tts_params.repetitions):
+        result = quicksim(layout, quicksim_params_inst)
+        if result is None:
+            quicksim_solution.append(sidb_simulation_result_100())
+        else:
+            quicksim_solution.append(result)
 
     quicksim_tts_value, quicksim_acc_value = calculate_tts_quicksim(result_quickexact, quicksim_solution, tts_params)
 
@@ -143,10 +149,6 @@ def enumerate_inputs_and_run_simulation(physical_parameters, sp, layout, layout_
 
         grid_results = run_grid_search_simanneal(sp, physical_parameters, result_quickexact, layout,
                                                  layout_coordinates_angstrom, param_grid, tts_params)
-
-        quicksim_params_inst = quicksim_params()
-        quicksim_params_inst.number_threads = sp.num_instances
-        quicksim_params_inst.simulation_parameters = physical_parameters
 
         quicksim_solution = []
         for num_inter in range(tts_params.repetitions):
@@ -189,11 +191,11 @@ def main():
     ]
 
     param_grid = {
-        'anneal_cycles': [100, 1000, 10000]  # Updated to include two annealing cycles
+        'anneal_cycles': [1000, 10000]  # Updated to include two annealing cycles
     }
 
     tts_params = time_to_solution_params()
-    tts_params.repetitions = 1000
+    tts_params.repetitions = 10000
 
     final_simanneal_tts = {ac: 0 for ac in param_grid['anneal_cycles']}
     final_simanneal_acc = {ac: [] for ac in param_grid['anneal_cycles']}

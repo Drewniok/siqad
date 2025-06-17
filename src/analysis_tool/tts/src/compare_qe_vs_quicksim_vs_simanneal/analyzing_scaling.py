@@ -38,13 +38,13 @@ def initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=1)
 
     return physical_parameters, sp_sa
 
-def time_to_solution_quicksim(layout, physical_parameters, tts_params):
+def time_to_solution_quicksim(layout, physical_parameters, tts_params, sa_sp):
 
     quicksim_param = quicksim_params()
-    quicksim_param.number_threads = 10
+    quicksim_param.number_threads = sa_sp.num_instances
     quicksim_param.simulation_parameters = physical_parameters
-    quicksim_param.alpha = 0.7
-    quicksim_param.iteration_steps = 100
+    quicksim_param.alpha = 0.6
+    quicksim_param.iteration_steps = 1000
 
     tts_stats_quicksim = time_to_solution_stats()
     time_to_solution(layout, quicksim_param, tts_params, tts_stats_quicksim)
@@ -55,7 +55,7 @@ def calculate_tts_simanneal(result_quickexact, all_sa_solution, tts_params):
     time_to_solution_for_given_simulation_results(result_quickexact, all_sa_solution, tts_params.confidence_level, st)
     return st.time_to_solution
 
-def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom, tts_params):
+def run_simanneal_simulation(sp, layout, physical_parameters, layout_coordinates_angstrom):
     sp.set_db_locs(layout_coordinates_angstrom)
     all_sa_solution = []
 
@@ -123,7 +123,7 @@ def generate_layouts(final_number_of_sidbs=25, x_distance=4, y_distance=4):
     """
     layouts = []
 
-    for num_of_sidbs in range(4, final_number_of_sidbs + 1):  # Start with 1 SiDB, go up to final_number_of_sidbs
+    for num_of_sidbs in range(11, final_number_of_sidbs + 1):  # Start with 1 SiDB, go up to final_number_of_sidbs
         layout = sidb_100_lattice()
         sidb_count = 0
 
@@ -149,7 +149,7 @@ def generate_layouts(final_number_of_sidbs=25, x_distance=4, y_distance=4):
 
 def main():
     tts_params = time_to_solution_params()
-    tts_params.repetitions = 1000
+    tts_params.repetitions = 100
     tts_params.engine = exact_sidb_simulation_engine.CLUSTERCOMPLETE
     """
     Main function to set up parameters, generate layout, and perform hyperparameter tuning.
@@ -159,7 +159,7 @@ def main():
     physical_parameters, sp_sa = initialize_simulation(mu=-0.32, lambda_tf=5.0, epsilon_r=5.6, num_threads=10)
 
     # Generate layouts
-    layouts = generate_layouts(36, 3, 3)
+    layouts = generate_layouts(36, 4, 4)
 
     # Define the CSV file path
     csv_file_path = "simulation_runtimes.csv"
@@ -180,8 +180,7 @@ def main():
 
         print(len(quickexact_result.charge_distributions))
 
-
-        sa_result = run_simanneal_simulation(sp_sa, lyt, physical_parameters, layout_coordinates_angstrom, tts_params)
+        sa_result = run_simanneal_simulation(sp_sa, lyt, physical_parameters, layout_coordinates_angstrom)
 
         print(len(sa_result))
 
@@ -196,7 +195,7 @@ def main():
 
         quickexact_runtime = quickexact_result.simulation_runtime.total_seconds()
 
-        tts_quicksim = time_to_solution_quicksim(lyt, physical_parameters, tts_params)
+        tts_quicksim = time_to_solution_quicksim(lyt, physical_parameters, tts_params, sp_sa)
 
         print(quickexact_runtime)
         print(tts_quicksim)
@@ -213,8 +212,6 @@ def main():
 
             # Write data to CSV
             csv_writer.writerow([layout_id, quickexact_runtime, tts_quicksim, sa_tts])
-
-
 
 if __name__ == "__main__":
     main()
