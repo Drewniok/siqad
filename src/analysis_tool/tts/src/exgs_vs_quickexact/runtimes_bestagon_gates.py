@@ -64,9 +64,6 @@ def simulate_exgs_inputs(sim_params, layout):
         [pos[0] * 10, pos[1] * 10] for pos in cds.get_all_sidb_locations_in_nm()
     ]
 
-    egs_results = run_exgs_simulation(sim_params, layout_coordinates_angstrom)
-    total_runtime += egs_results.simulation_runtime.total_seconds()
-
     bii = bdl_input_iterator_100(layout)
     num_patterns = bii.num_input_pairs() ** 2
 
@@ -93,9 +90,6 @@ def simulate_exgs_inputs(sim_params, layout):
 def simulate_quickexact_inputs(layout, physical_params):
     """Enumerates input patterns and simulates using QuickExact."""
     total_runtime = 0.0
-
-    quickexact_runtime = run_quickexact_simulation(layout, physical_params)
-    total_runtime += quickexact_runtime.simulation_runtime.total_seconds()
 
     bii = bdl_input_iterator_100(layout)
     num_patterns = bii.num_input_pairs() ** 2
@@ -164,16 +158,13 @@ def main():
             "ratio": exgs_runtime / quickexact_runtime,
         })
 
-    from datetime import datetime
-
-    # Generate file name with current date
+    # Save results to CSV
     current_date = datetime.now().strftime("%Y-%m-%d")
     file_name = f"simulation_results_{current_date}.csv"
 
     with open(file_name, "w", newline="") as csvfile:
         fieldnames = ["Gate", "Number of SiDBs", "ExGS Runtime (s)", "QuickExact Runtime (s)", "Ratio (ExGS/QuickExact)"]
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
         writer.writeheader()
         for stat in statistics:
             writer.writerow({
@@ -184,6 +175,7 @@ def main():
                 "Ratio (ExGS/QuickExact)": stat["ratio"],
             })
 
+    # Print detailed statistics
     print(f"\n=== Detailed Runtime Statistics ===")
     for stat in statistics:
         print(f"Gate: {stat['gate']}")
@@ -191,8 +183,14 @@ def main():
         print(f"  QuickExact Runtime: {stat['quickexact_runtime']:.4f} seconds")
         print(f"  Ratio ExGS/QuickExact: {stat['ratio']:.4f}\n")
 
+    # Overall totals
     print(f"\nOverall Total ExGS Runtime: {total_exgs_time:.4f} seconds")
     print(f"Overall Total QuickExact Runtime: {total_quickexact_time:.4f} seconds")
+
+    # --- NEW: Overall average ratio ---
+    if statistics:
+        average_ratio = sum(stat["ratio"] for stat in statistics) / len(statistics)
+        print(f"Overall Average Ratio (ExGS/QuickExact): {average_ratio:.4f}")
 
 if __name__ == "__main__":
     main()
